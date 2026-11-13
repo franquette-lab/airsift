@@ -1,6 +1,7 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
+import { urlRepository, UrlItem } from './database';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -30,10 +31,14 @@ const createWindow = () => {
   mainWindow.webContents.openDevTools();
 };
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
+// Un seul bloc app.whenReady() pour éviter d'ouvrir 2 fenêtres
 app.whenReady().then(() => {
+  // Enregistrement des canaux IPC une fois l'application prête
+  ipcMain.handle('urls:getAll', () => urlRepository.getAll());
+  ipcMain.handle('urls:add', (_, url: string, title?: string) => urlRepository.add(url, title));
+  ipcMain.handle('urls:updateStatus', (_, id: number, status: UrlItem['status']) => urlRepository.updateStatus(id, status));
+  ipcMain.handle('urls:delete', (_, id: number) => urlRepository.delete(id));
+
   createWindow();
 
   // On OS X it's common to re-create a window in the app when the
@@ -45,14 +50,9 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+// Quit when all windows are closed, except on macOS.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
