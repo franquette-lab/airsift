@@ -3,7 +3,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { urlRepository, UrlItem } from './database';
 import { encryptUrlsPayload } from './crypto';
-import { startBluetoothBroadcast, stopBluetoothBroadcast } from './bluetooth';
+import { startWifiShare, stopWifiShare } from './wifi-share';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -41,7 +41,7 @@ app.whenReady().then(() => {
   ipcMain.handle('urls:updateStatus', (_, id: number, status: UrlItem['status']) => urlRepository.updateStatus(id, status));
   ipcMain.handle('urls:delete', (_, id: number) => urlRepository.delete(id));
 
-  // Canaux IPC pour le chiffrement et l'envoi Bluetooth
+  // Canaux IPC pour le chiffrement et le partage Wi-Fi local
   ipcMain.handle('bluetooth:sendReadyUrls', async (_, secretKey: string) => {
     const allUrls = urlRepository.getAll();
     const readyUrls = allUrls.filter((u) => u.status === 'to_send');
@@ -51,12 +51,13 @@ app.whenReady().then(() => {
     }
 
     const encrypted = encryptUrlsPayload(readyUrls, secretKey);
-    const statusMessage = await startBluetoothBroadcast(encrypted);
+    const statusMessage = await startWifiShare(encrypted);
+
     return { statusMessage, encryptedPreview: encrypted };
   });
 
   ipcMain.handle('bluetooth:stop', () => {
-    stopBluetoothBroadcast();
+    stopWifiShare();
   });
 
   createWindow();
@@ -72,6 +73,7 @@ app.whenReady().then(() => {
 
 // Quit when all windows are closed, except on macOS.
 app.on('window-all-closed', () => {
+  stopWifiShare();
   if (process.platform !== 'darwin') {
     app.quit();
   }

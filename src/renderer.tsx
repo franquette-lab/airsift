@@ -27,7 +27,7 @@ interface UrlItem {
 
 const COLUMNS: { id: UrlItem['status']; title: string; color: string }[] = [
   { id: 'inbox', title: '📥 À trier (Inbox)', color: '#e3f2fd' },
-  { id: 'to_send', title: '📡 Prêt à envoyer (Bluetooth)', color: '#e8f5e9' },
+  { id: 'to_send', title: '📶 Prêt à envoyer (Wi-Fi)', color: '#e8f5e9' },
   { id: 'archive', title: '📦 Archives', color: '#f5f5f5' },
 ];
 
@@ -121,11 +121,11 @@ function App() {
   const [urls, setUrls] = useState<UrlItem[]>([]);
   const [input, setInput] = useState('');
 
-  // États pour le chiffrement et le Bluetooth
+  // États pour le chiffrement et le partage Wi-Fi
   const [pinCode, setPinCode] = useState('1234');
-  const [btStatus, setBtStatus] = useState<string>('');
-  const [btError, setBtError] = useState<string>('');
-  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [wifiStatus, setWifiStatus] = useState<string>('');
+  const [wifiError, setWifiError] = useState<string>('');
+  const [isSharing, setIsSharing] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -171,30 +171,30 @@ function App() {
     await window.airsiftAPI.updateUrlStatus(urlId, newStatus);
   };
 
-  // Lancement du chiffrement JSON et de la diffusion Bluetooth
-  const handleStartBluetooth = async () => {
-    setBtError('');
-    setBtStatus('');
+  // Lancement du chiffrement JSON et du serveur Wi-Fi local
+  const handleStartShare = async () => {
+    setWifiError('');
+    setWifiStatus('');
     if (!pinCode.trim()) {
-      setBtError('Veuillez saisir un code PIN de chiffrement.');
+      setWifiError('Veuillez saisir un code PIN de chiffrement.');
       return;
     }
 
     try {
       const result = await window.airsiftAPI.sendReadyUrlsBluetooth(pinCode.trim());
-      setBtStatus(result.statusMessage);
-      setIsBroadcasting(true);
+      setWifiStatus(result.statusMessage);
+      setIsSharing(true);
     } catch (err: any) {
-      setBtError(err.message || 'Erreur lors du démarrage Bluetooth.');
-      setIsBroadcasting(false);
+      setWifiError(err.message || 'Erreur lors du démarrage du partage Wi-Fi.');
+      setIsSharing(false);
     }
   };
 
-  // Arrêt de la diffusion Bluetooth
-  const handleStopBluetooth = async () => {
+  // Arrêt du partage Wi-Fi
+  const handleStopShare = async () => {
     await window.airsiftAPI.stopBluetooth();
-    setIsBroadcasting(false);
-    setBtStatus('Diffusion Bluetooth arrêtée.');
+    setIsSharing(false);
+    setWifiStatus('Partage Wi-Fi arrêté.');
   };
 
   const readyCount = urls.filter((u) => u.status === 'to_send').length;
@@ -225,7 +225,7 @@ function App() {
         </Button>
       </form>
 
-      {/* Barre de chiffrement et transfert Bluetooth */}
+      {/* Barre de chiffrement et transfert Wi-Fi */}
       <div
         style={{
           backgroundColor: '#f0f7ff',
@@ -263,37 +263,37 @@ function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {!isBroadcasting ? (
+          {!isSharing ? (
             <Button
               variant="contained"
               color="success"
-              onClick={handleStartBluetooth}
+              onClick={handleStartShare}
               disabled={readyCount === 0}
               sx={{ borderRadius: '8px', fontWeight: 'bold' }}
             >
-              📡 Diffuser en Bluetooth
+              📶 Partager en Wi-Fi
             </Button>
           ) : (
             <Button
               variant="outlined"
               color="error"
-              onClick={handleStopBluetooth}
+              onClick={handleStopShare}
               sx={{ borderRadius: '8px', fontWeight: 'bold' }}
             >
-              ⏹ Arrêter la diffusion
+              ⏹ Arrêter le partage Wi-Fi
             </Button>
           )}
         </div>
 
-        {/* Messages d'état ou d'erreur Bluetooth */}
-        {btStatus && (
+        {/* Messages d'état ou d'erreur Wi-Fi */}
+        {wifiStatus && (
           <div style={{ width: '100%', fontSize: '13px', color: '#2e7d32', fontWeight: 'bold' }}>
-            ✅ {btStatus} — Visible sur smartphone sous le nom « Airsift-PC ».
+            ✅ {wifiStatus}
           </div>
         )}
-        {btError && (
+        {wifiError && (
           <div style={{ width: '100%', fontSize: '13px', color: '#d32f2f', fontWeight: 'bold' }}>
-            ⚠️ {btError}
+            ⚠️ {wifiError}
           </div>
         )}
       </div>
