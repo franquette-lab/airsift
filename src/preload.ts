@@ -8,4 +8,6 @@ contextBridge.exposeInMainWorld('airsiftAPI', {
   addUrl: (url: string, title?: string) => ipcRenderer.invoke('urls:add', url, title),
   updateUrlStatus: (id: number, status: string) => ipcRenderer.invoke('urls:updateStatus', id, status),
   deleteUrl: (id: number) => ipcRenderer.invoke('urls:delete', id),
+  sendReadyUrlsBluetooth: (secretKey: string) => ipcRenderer.invoke('bluetooth:sendReadyUrls', secretKey),
+  stopBluetooth: () => ipcRenderer.invoke('bluetooth:stop'),
 });

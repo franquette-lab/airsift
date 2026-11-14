@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { urlRepository, UrlItem } from './database';
+import { encryptUrlsPayload } from './crypto';
+import { startBluetoothBroadcast, stopBluetoothBroadcast } from './bluetooth';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -33,11 +35,29 @@ const createWindow = () => {
 
 // Un seul bloc app.whenReady() pour éviter d'ouvrir 2 fenêtres
 app.whenReady().then(() => {
-  // Enregistrement des canaux IPC une fois l'application prête
+  // Canaux IPC pour SQLite
   ipcMain.handle('urls:getAll', () => urlRepository.getAll());
   ipcMain.handle('urls:add', (_, url: string, title?: string) => urlRepository.add(url, title));
   ipcMain.handle('urls:updateStatus', (_, id: number, status: UrlItem['status']) => urlRepository.updateStatus(id, status));
   ipcMain.handle('urls:delete', (_, id: number) => urlRepository.delete(id));
+
+  // Canaux IPC pour le chiffrement et l'envoi Bluetooth
+  ipcMain.handle('bluetooth:sendReadyUrls', async (_, secretKey: string) => {
+    const allUrls = urlRepository.getAll();
+    const readyUrls = allUrls.filter((u) => u.status === 'to_send');
+    
+    if (readyUrls.length === 0) {
+      throw new Error('Aucun lien dans la colonne "Prêt à envoyer".');
+    }
+
+    const encrypted = encryptUrlsPayload(readyUrls, secretKey);
+    const statusMessage = await startBluetoothBroadcast(encrypted);
+    return { statusMessage, encryptedPreview: encrypted };
+  });
+
+  ipcMain.handle('bluetooth:stop', () => {
+    stopBluetoothBroadcast();
+  });
 
   createWindow();
 
