@@ -10,33 +10,43 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-
 declare global {
   interface Window {
     airsiftAPI: any;
   }
 }
-
 interface UrlItem {
   id: number;
   url: string;
   title: string;
   status: 'inbox' | 'to_send' | 'archive';
+  room_id?: string | null;
   created_at: string;
 }
-
+interface RoomItem {
+  id: number;
+  name: string;
+  room_id: string;
+  secret_key: string;
+  full_url: string;
+}
 const COLUMNS: { id: UrlItem['status']; title: string; color: string }[] = [
   { id: 'inbox', title: '📥 À trier (Inbox)', color: '#e3f2fd' },
-  { id: 'to_send', title: '📶 Prêt à envoyer (Wi-Fi)', color: '#e8f5e9' },
+  { id: 'to_send', title: '🚀 Prêt à envoyer', color: '#e8f5e9' },
   { id: 'archive', title: '📦 Archives', color: '#f5f5f5' },
 ];
-
-// Carte URL déplaçable
-function DraggableCard({ item, onDelete }: { item: UrlItem; onDelete: (id: number) => void }) {
+function DraggableCard({
+  item,
+  senderName,
+  onDelete,
+}: {
+  item: UrlItem;
+  senderName?: string;
+  onDelete: (id: number) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: item.id,
   });
-
   const style: React.CSSProperties = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     opacity: isDragging ? 0.6 : 1,
@@ -52,12 +62,28 @@ function DraggableCard({ item, onDelete }: { item: UrlItem; onDelete: (id: numbe
     wordBreak: 'break-all',
     gap: '8px',
   };
-
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <span style={{ fontSize: '14px', fontFamily: 'sans-serif', color: '#333' }}>
-        {item.url}
-      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <span style={{ fontSize: '14px', fontFamily: 'sans-serif', color: '#333' }}>
+          {item.url}
+        </span>
+        {senderName && (
+          <span
+            style={{
+              fontSize: '11px',
+              backgroundColor: '#e0f2fe',
+              color: '#0369a1',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              alignSelf: 'flex-start',
+              fontWeight: 'bold',
+            }}
+          >
+            📲 Reçu de {senderName}
+          </span>
+        )}
+      </div>
       <button
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => onDelete(item.id)}
@@ -77,19 +103,19 @@ function DraggableCard({ item, onDelete }: { item: UrlItem; onDelete: (id: numbe
     </div>
   );
 }
-
-// Colonne de réception
 function DroppableColumn({
   id,
   title,
   color,
   items,
+  rooms,
   onDelete,
 }: {
   id: UrlItem['status'];
   title: string;
   color: string;
   items: UrlItem[];
+  rooms: RoomItem[];
   onDelete: (id: number) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
@@ -110,51 +136,59 @@ function DroppableColumn({
       <h2 style={{ fontSize: '16px', fontFamily: 'sans-serif', marginTop: 0, marginBottom: '16px', color: '#1a1a1a' }}>
         {title} ({items.length})
       </h2>
-      {items.map((item) => (
-        <DraggableCard key={item.id} item={item} onDelete={onDelete} />
-      ))}
+      {items.map((item) => {
+        const sender = item.room_id ? rooms.find((r) => r.room_id === item.room_id)?.name : undefined;
+        return <DraggableCard key={item.id} item={item} senderName={sender} onDelete={onDelete} />;
+      })}
     </div>
   );
 }
-
 function App() {
   const [urls, setUrls] = useState<UrlItem[]>([]);
+  const [rooms, setRooms] = useState<RoomItem[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState<string>('');
   const [input, setInput] = useState('');
 
-  // États pour le chiffrement et le partage Wi-Fi
-  const [pinCode, setPinCode] = useState('1234');
-  const [wifiStatus, setWifiStatus] = useState<string>('');
-  const [wifiError, setWifiError] = useState<string>('');
-  const [isSharing, setIsSharing] = useState(false);
+  // États de notification et création de contact
+  const [statusMsg, setStatusMsg] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [isAddingRoom, setIsAddingRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );
-
-  const loadUrls = async () => {
-    const data = await window.airsiftAPI.getAllUrls();
-    setUrls(data);
+  const loadData = async () => {
+    const [urlsData, roomsData] = await Promise.all([
+      window.airsiftAPI.getAllUrls(),
+      window.airsiftAPI.getAllRooms(),
+    ]);
+    setUrls(urlsData);
+    setRooms(roomsData);
+    if (roomsData.length > 0 && !selectedRoomId) {
+      setSelectedRoomId(roomsData.room_id);
+    }
   };
-
   useEffect(() => {
-    loadUrls();
+    loadData();
+    const unsubscribe = window.airsiftAPI.onUrlsReceived(() => {
+      loadData();
+    });
+    return () => unsubscribe();
   }, []);
-
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
     await window.airsiftAPI.addUrl(input.trim());
     setInput('');
-    loadUrls();
+    loadData();
   };
-
   const handleDelete = async (id: number) => {
     await window.airsiftAPI.deleteUrl(id);
-    loadUrls();
+    loadData();
   };
-
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
@@ -170,42 +204,51 @@ function App() {
     );
     await window.airsiftAPI.updateUrlStatus(urlId, newStatus);
   };
+  const handleSendCloud = async () => {
+    setErrorMsg('');
+    setStatusMsg('');
 
-  // Lancement du chiffrement JSON et du serveur Wi-Fi local
-  const handleStartShare = async () => {
-    setWifiError('');
-    setWifiStatus('');
-    if (!pinCode.trim()) {
-      setWifiError('Veuillez saisir un code PIN de chiffrement.');
+    if (!selectedRoomId) {
+      setErrorMsg('Veuillez sélectionner un destinataire.');
       return;
     }
 
     try {
-      const result = await window.airsiftAPI.sendReadyUrlsBluetooth(pinCode.trim());
-      setWifiStatus(result.statusMessage);
-      setIsSharing(true);
+      const result = await window.airsiftAPI.sendReadyUrlsCloud(selectedRoomId);
+      if (result.success) {
+        const targetRoom = rooms.find((r) => r.room_id === selectedRoomId);
+        setStatusMsg(`✅ Liens chiffrés envoyés vers ${targetRoom?.name || 'le relais'} !`);
+      } else {
+        setErrorMsg(result.error || "Erreur lors de l'envoi.");
+      }
     } catch (err: any) {
-      setWifiError(err.message || 'Erreur lors du démarrage du partage Wi-Fi.');
-      setIsSharing(false);
+      setErrorMsg(err.message || "Aucun lien prêt à envoyer.");
     }
   };
-
-  // Arrêt du partage Wi-Fi
-  const handleStopShare = async () => {
-    await window.airsiftAPI.stopBluetooth();
-    setIsSharing(false);
-    setWifiStatus('Partage Wi-Fi arrêté.');
+  const handleCopySecretLink = () => {
+    const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
+    if (!currentRoom) return;
+    navigator.clipboard.writeText(currentRoom.full_url);
+    setErrorMsg('');
+    setStatusMsg(`📋 Lien secret de "${currentRoom.name}" copié ! Ouvrez-le dans Safari sur iPhone.`);
   };
-
+  const handleCreateRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRoomName.trim()) return;
+    const newRoom = await window.airsiftAPI.createRoom(newRoomName.trim());
+    await loadData();
+    setSelectedRoomId(newRoom.room_id);
+    setNewRoomName('');
+    setIsAddingRoom(false);
+    setStatusMsg(`✨ Salle "${newRoom.name}" créée !`);
+  };
   const readyCount = urls.filter((u) => u.status === 'to_send').length;
-
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px', fontFamily: 'sans-serif' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '24px', marginTop: 0 }}>
         Airsift
       </h1>
 
-      {/* Formulaire d'ajout d'URL */}
       <form onSubmit={handleAdd} style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
         <input
           type="text"
@@ -224,8 +267,6 @@ function App() {
           Ajouter
         </Button>
       </form>
-
-      {/* Barre de chiffrement et transfert Wi-Fi */}
       <div
         style={{
           backgroundColor: '#f0f7ff',
@@ -234,71 +275,121 @@ function App() {
           padding: '16px 20px',
           marginBottom: '28px',
           display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '16px',
+          flexDirection: 'column',
+          gap: '12px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <label style={{ fontWeight: 'bold', fontSize: '14px', color: '#0d47a1' }}>
-            🔒 Code PIN AES-256 :
-          </label>
-          <input
-            type="password"
-            value={pinCode}
-            onChange={(e) => setPinCode(e.target.value)}
-            placeholder="Code PIN"
-            style={{
-              width: '120px',
-              padding: '8px 12px',
-              fontSize: '14px',
-              borderRadius: '6px',
-              border: '1px solid #90caf9',
-            }}
-          />
-          <span style={{ fontSize: '13px', color: '#555' }}>
-            ({readyCount} {readyCount > 1 ? 'liens prêts' : 'lien prêt'})
-          </span>
-        </div>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <label style={{ fontWeight: 'bold', fontSize: '14px', color: '#0d47a1' }}>
+              🔒 Destinataire :
+            </label>
+            <select
+              value={selectedRoomId}
+              onChange={(e) => setSelectedRoomId(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                fontSize: '14px',
+                borderRadius: '6px',
+                border: '1px solid #90caf9',
+                backgroundColor: '#fff',
+                fontWeight: 'bold',
+              }}
+            >
+              {rooms.map((room) => (
+                <option key={room.room_id} value={room.room_id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {!isSharing ? (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleCopySecretLink}
+              title="Copier l'URL secrète avec clé intégrée pour Safari iOS"
+            >
+              🔗 Copier le lien secret
+            </Button>
+
+            {!isAddingRoom ? (
+              <Button
+                variant="text"
+                size="small"
+                onClick={() => setIsAddingRoom(true)}
+                title="Ajouter un nouvel appareil ou correspondant"
+              >
+                + Nouveau contact
+              </Button>
+            ) : (
+              <form
+                onSubmit={handleCreateRoom}
+                style={{ display: 'flex', gap: '6px', alignItems: 'center' }}
+              >
+                <input
+                  type="text"
+                  placeholder="Nom (ex: iPhone)"
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  autoFocus
+                  style={{
+                    padding: '6px 10px',
+                    fontSize: '13px',
+                    borderRadius: '6px',
+                    border: '1px solid #90caf9',
+                    backgroundColor: '#fff',
+                  }}
+                />
+                <Button type="submit" variant="contained" size="small">
+                  OK
+                </Button>
+                <Button
+                  type="button"
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    setIsAddingRoom(false);
+                    setNewRoomName('');
+                  }}
+                >
+                  Annuler
+                </Button>
+              </form>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '13px', color: '#555' }}>
+              ({readyCount} {readyCount > 1 ? 'liens prêts' : 'lien prêt'})
+            </span>
             <Button
               variant="contained"
               color="success"
-              onClick={handleStartShare}
+              onClick={handleSendCloud}
               disabled={readyCount === 0}
-              sx={{ borderRadius: '8px', fontWeight: 'bold' }}
+              sx={{ fontWeight: 'bold' }}
             >
-              📶 Partager en Wi-Fi
+              🚀 Envoyer ({readyCount})
             </Button>
-          ) : (
-            <Button
-              variant="outlined"
-              color="error"
-              onClick={handleStopShare}
-              sx={{ borderRadius: '8px', fontWeight: 'bold' }}
-            >
-              ⏹ Arrêter le partage Wi-Fi
-            </Button>
-          )}
+          </div>
         </div>
 
-        {/* Messages d'état ou d'erreur Wi-Fi */}
-        {wifiStatus && (
-          <div style={{ width: '100%', fontSize: '13px', color: '#2e7d32', fontWeight: 'bold' }}>
-            ✅ {wifiStatus}
-          </div>
+        {statusMsg && (
+          <div style={{ fontSize: '13px', color: '#1b5e20', fontWeight: 'bold' }}>{statusMsg}</div>
         )}
-        {wifiError && (
-          <div style={{ width: '100%', fontSize: '13px', color: '#d32f2f', fontWeight: 'bold' }}>
-            ⚠️ {wifiError}
-          </div>
+        {errorMsg && (
+          <div style={{ fontSize: '13px', color: '#c62828', fontWeight: 'bold' }}>⚠️ {errorMsg}</div>
         )}
       </div>
 
-      {/* Tableau Kanban 3 colonnes */}
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
           {COLUMNS.map((col) => (
@@ -308,6 +399,7 @@ function App() {
               title={col.title}
               color={col.color}
               items={urls.filter((u) => u.status === col.id)}
+              rooms={rooms}
               onDelete={handleDelete}
             />
           ))}
@@ -316,6 +408,7 @@ function App() {
     </div>
   );
 }
-
-const root = createRoot(document.getElementById('root')!);
-root.render(<App />);
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  createRoot(rootElement).render(<App />);
+}

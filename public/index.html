@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Airsift • Mobile</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --success: #10b981;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body {
+      margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+      display: flex; flex-direction: column; min-height: 100vh;
+    }
+    header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-bottom: 16px; border-bottom: 1px solid #334155; margin-bottom: 20px;
+    }
+    h1 { font-size: 1.25rem; margin: 0; display: flex; align-items: center; gap: 8px; }
+    .status-badge {
+      font-size: 0.75rem; padding: 4px 10px; border-radius: 999px;
+      background: #334155; color: var(--muted); font-weight: 600;
+    }
+    .status-badge.online { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+    .status-badge.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+
+    .send-box {
+      background: var(--card); padding: 16px; border-radius: 14px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2); margin-bottom: 24px;
+    }
+    .input-group { display: flex; gap: 8px; margin-bottom: 12px; }
+    input[type="url"] {
+      flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #475569;
+      background: #0f172a; color: var(--text); font-size: 1rem; outline: none;
+    }
+    input[type="url"]:focus { border-color: var(--accent); }
+    button {
+      padding: 12px 16px; border-radius: 10px; border: none; font-weight: 600;
+      font-size: 0.95rem; cursor: pointer;
+    }
+    button:active { opacity: 0.7; }
+    .btn-paste { background: #334155; color: var(--text); }
+    .btn-send { background: var(--accent); color: white; width: 100%; }
+    
+    h2 { font-size: 0.9rem; color: var(--muted); margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .links-list { display: flex; flex-direction: column; gap: 10px; }
+    .link-card {
+      background: var(--card); padding: 14px; border-radius: 12px;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      border-left: 4px solid var(--accent);
+    }
+    .link-info { overflow: hidden; }
+    .link-title { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
+    .link-url { font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    .btn-open {
+      background: rgba(59, 130, 246, 0.15); color: var(--accent);
+      text-decoration: none; padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; flex-shrink: 0;
+    }
+    .empty-state { text-align: center; color: var(--muted); padding: 32px 16px; font-size: 0.9rem; }
+    #toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #10b981; color: white; padding: 10px 20px; border-radius: 999px;
+      font-size: 0.85rem; font-weight: 600; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>🔒 Hare Sync</h1>
+    <span id="status" class="status-badge">Connexion...</span>
+  </header>
+
+  <div class="send-box">
+    <div class="input-group">
+      <input type="url" id="urlInput" placeholder="https://..." autocomplete="off" autocapitalize="off">
+      <button class="btn-paste" id="pasteBtn" type="button">Coller</button>
+    </div>
+    <button class="btn-send" id="sendBtn" type="button">Envoyer vers le PC</button>
+  </div>
+
+  <h2>Reçus du PC</h2>
+  <div id="linksList" class="links-list">
+    <div class="empty-state">Aucun lien reçu pour le moment.<br>En attente de transfert Wi-Fi...</div>
+  </div>
+
+  <div id="toast">Lien envoyé !</div>
+
+  <!-- Bibliothèque légère compatible HTTP local sur Safari iOS -->
+  <script>
+    function bufferToBase64Url(bytes) {
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function base64UrlToBuffer(base64Url) {
+      let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) base64 += '=';
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+
+    function xorStream(data, key, nonce) {
+      const out = new Uint8Array(data.length);
+      let state = 0x9e3779b9;
+      for (let i = 0; i < key.length; i++) state = Math.imul(state ^ key[i], 0x85ebca6b);
+      for (let i = 0; i < nonce.length; i++) state = Math.imul(state ^ nonce[i], 0xc2b2ae35);
+
+      for (let i = 0; i < data.length; i++) {
+        state ^= state << 13;
+        state ^= state >>> 17;
+        state ^= state << 5;
+        const keyByte = (state >>> ((i % 4) * 8)) & 0xff;
+        const mixByte = key[i % key.length] ^ nonce[i % nonce.length];
+        out[i] = data[i] ^ keyByte ^ mixByte;
+      }
+      return out;
+    }
+
+    function encryptLocal(data, secretKeyBase64Url) {
+      const key = base64UrlToBuffer(secretKeyBase64Url);
+      const nonce = new Uint8Array(16);
+      for (let i = 0; i < 16; i++) nonce[i] = Math.floor(Math.random() * 256);
+
+      const encoded = new TextEncoder().encode(JSON.stringify(data));
+      const cipher = xorStream(encoded, key, nonce);
+
+      const combined = new Uint8Array(nonce.length + cipher.length);
+      combined.set(nonce, 0);
+      combined.set(cipher, nonce.length);
+      return bufferToBase64Url(combined);
+    }
+
+    function decryptLocal(encryptedBase64Url, secretKeyBase64Url) {
+      const key = base64UrlToBuffer(secretKeyBase64Url);
+      const combined = base64UrlToBuffer(encryptedBase64Url);
+      const nonce = combined.slice(0, 16);
+      const cipher = combined.slice(16);
+
+      const plainBytes = xorStream(cipher, key, nonce);
+      return JSON.parse(new TextDecoder().decode(plainBytes));
+    }
+
+    const statusEl = document.getElementById('status');
+    const urlInput = document.getElementById('urlInput');
+    const linksList = document.getElementById('linksList');
+    const toastEl = document.getElementById('toast');
+
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get('room');
+    const secretKey = window.location.hash.substring(1);
+
+    let ws = null;
+    let receivedLinks = JSON.parse(localStorage.getItem('airsift_links_' + roomId) || '[]');
+
+    function showToast(msg, isError = false) {
+      toastEl.textContent = msg;
+      toastEl.style.background = isError ? 'var(--error)' : 'var(--success)';
+      toastEl.style.opacity = '1';
+      setTimeout(() => { toastEl.style.opacity = '0'; }, 2500);
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function renderLinks() {
+      if (receivedLinks.length === 0) return;
+      linksList.innerHTML = receivedLinks.map(item => `
+        <div class="link-card">
+          <div class="link-info">
+            <div class="link-title">${escapeHtml(item.title || item.url)}</div>
+            <span class="link-url">${escapeHtml(item.url)}</span>
+          </div>
+          <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" class="btn-open">Ouvrir</a>
+        </div>
+      `).join('');
+    }
+
+    function connectWebSocket() {
+      if (!roomId || !secretKey) {
+        statusEl.textContent = 'Lien invalide';
+        statusEl.className = 'status-badge error';
+        return;
+      }
+
+      ws = new WebSocket(`ws://${window.location.host}`);
+
+      ws.onopen = () => {
+        statusEl.textContent = 'Wi-Fi Connecté';
+        statusEl.className = 'status-badge online';
+        ws.send(JSON.stringify({ type: 'join', roomId, device: 'mobile' }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'encrypted_payload' && msg.payload) {
+            const decrypted = decryptLocal(msg.payload, secretKey);
+            if (decrypted && Array.isArray(decrypted.items)) {
+              receivedLinks = [...decrypted.items, ...receivedLinks].slice(0, 50);
+              localStorage.setItem('airsift_links_' + roomId, JSON.stringify(receivedLinks));
+              renderLinks();
+              showToast(`${decrypted.items.length} lien(s) reçu(s) !`);
+            }
+          }
+        } catch (err) {
+          showToast('Erreur de déchiffrement', true);
+        }
+      };
+
+      ws.onclose = () => {
+        statusEl.textContent = 'Reconnexion...';
+        statusEl.className = 'status-badge';
+        setTimeout(connectWebSocket, 3000);
+      };
+    }
+
+    document.getElementById('pasteBtn').addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) urlInput.value = text.trim();
+      } catch {
+        urlInput.focus();
+        showToast('Maintenez appuyé pour coller', true);
+      }
+    });
+
+    document.getElementById('sendBtn').addEventListener('click', () => {
+      const rawUrl = urlInput.value.trim();
+      if (!rawUrl) return;
+
+      const formattedUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        showToast('PC non connecté', true);
+        return;
+      }
+
+      try {
+        const payload = { items: [{ url: formattedUrl, title: formattedUrl }] };
+        const encryptedBlob = encryptLocal(payload, secretKey);
+        ws.send(JSON.stringify({ type: 'send', payload: encryptedBlob }));
+        urlInput.value = '';
+        showToast('Envoyé au PC !');
+      } catch (err) {
+        showToast('Erreur : ' + err.message, true);
+      }
+    });
+
+    renderLinks();
+    connectWebSocket();
+  </script>
+</body>
+</html>
