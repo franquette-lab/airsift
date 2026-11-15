@@ -273,6 +273,20 @@ function App() {
     setIsAddingRoom(false);
     setStatusMsg(`✨ Salle "${newRoom.name}" créée !`);
   };
+
+  const handleDeleteRoom = async () => {
+    const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
+    if (!currentRoom) return;
+
+    await window.airsiftAPI.deleteRoom(currentRoom.id);
+    const updatedRooms = await window.airsiftAPI.getAllRooms();
+    setRooms(updatedRooms);
+    setSelectedRoomId(updatedRooms.length > 0 ? updatedRooms[0].room_id : '');
+    setErrorMsg('');
+    setStatusMsg(`🗑️ Contact "${currentRoom.name}" supprimé.`);
+  };
+
+
   const readyCount = urls.filter((u) => u.status === 'to_send').length;
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px', fontFamily: 'sans-serif' }}>
@@ -341,6 +355,20 @@ function App() {
                 </option>
               ))}
             </select>
+
+            {rooms.length > 0 && (
+              <Button
+                variant="text"
+                color="error"
+                size="small"
+                onClick={handleDeleteRoom}
+                title="Supprimer ce destinataire"
+                sx={{ minWidth: 'auto', px: 1 }}
+              >
+                🗑️
+              </Button>
+            )}
+
 
             <Button
               variant="outlined"
