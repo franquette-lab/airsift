@@ -31,6 +31,9 @@ const createWindow = (): BrowserWindow => {
 };
 
 app.whenReady().then(async () => {
+  // Déclare le nom de l'application auprès de Windows pour autoriser les notifications natives
+  app.setAppUserModelId('Airsift');
+
   // 1. Démarrage du serveur relais local sur le Wi-Fi maison (port 3000)
   // Retourne automatiquement l'adresse locale du PC (ex: http://192.168.1.25:3000)
   const localHttpUrl = await startLocalRelay(3000);
@@ -73,6 +76,7 @@ app.whenReady().then(async () => {
     }
   });
 });
+
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

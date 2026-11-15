@@ -143,6 +143,7 @@ function DroppableColumn({
     </div>
   );
 }
+
 function App() {
   const [urls, setUrls] = useState<UrlItem[]>([]);
   const [rooms, setRooms] = useState<RoomItem[]>([]);
@@ -171,13 +172,43 @@ function App() {
       setSelectedRoomId(roomsData.room_id);
     }
   };
-  useEffect(() => {
-    loadData();
-    const unsubscribe = window.airsiftAPI.onUrlsReceived(() => {
+  
+  
+    // Joue un double bip doux sans aucun fichier audio externe
+    const playReceiveSound = () => {
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime); // Note La5
+        osc.frequency.setValueAtTime(1108.73, ctx.currentTime + 0.1); // Note Do#6
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } catch {
+        // Ignore si l'audio est bloqué
+      }
+    };
+  
+    useEffect(() => {
       loadData();
-    });
-    return () => unsubscribe();
-  }, []);
+  
+      const unsubscribe = window.airsiftAPI.onUrlsReceived((newItems: UrlItem[]) => {
+        loadData();
+        playReceiveSound();
+        setErrorMsg('');
+        const count = newItems?.length || 1;
+        setStatusMsg(`🔔 ${count} ${count > 1 ? 'nouveaux liens reçus' : 'nouveau lien reçu'} dans "À trier" !`);
+      });
+      return () => unsubscribe();
+    }, []);
+  
+
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
@@ -246,7 +277,7 @@ function App() {
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px', fontFamily: 'sans-serif' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '24px', marginTop: 0 }}>
-        Airsift
+        Hare Sync
       </h1>
 
       <form onSubmit={handleAdd} style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>

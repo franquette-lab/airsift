@@ -6,7 +6,6 @@ import { roomRepository, urlRepository, RoomItem, UrlItem } from './database';
 // Remplacez par l'URL de votre relais sur Oracle Cloud (en wss:// si HTTPS est actif)
 //const RELAY_WS_URL = 'wss://haresync.duckdns.org';
   const RELAY_WS_URL = 'ws://localhost:3000';
-
     
 // Format standard des paquets échangés entre le PC et l'iPhone
 export interface SharedPayload {
@@ -110,6 +109,7 @@ class CloudShareManager {
       // Notifie l'interface Kanban (React/HTML) pour afficher les nouveaux liens sans recharger
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send('urls:received', addedItems);
+        this.mainWindow.flashFrame(true); // Fait clignoter l'icône Windows
       }
 
       // Affiche une notification Windows native
