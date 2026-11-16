@@ -49,22 +49,42 @@
     }
     button:active { opacity: 0.7; }
     .btn-paste { background: #334155; color: var(--text); }
-    .btn-send { background: var(--accent); color: white; width: 100%; }
+    .btn-send { background: var(--accent); color: white; width: width: 100%; width: 100%; }
     
-    h2 { font-size: 0.9rem; color: var(--muted); margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin: 0 0 12px 0;
+    }
+    h2 { font-size: 0.9rem; color: var(--muted); margin: 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .btn-clear-all {
+      background: transparent; color: var(--error); padding: 4px 8px;
+      font-size: 0.8rem; border-radius: 6px;
+    }
+    .btn-clear-all:hover { background: rgba(239, 68, 68, 0.15); }
+
     .links-list { display: flex; flex-direction: column; gap: 10px; }
     .link-card {
       background: var(--card); padding: 14px; border-radius: 12px;
       display: flex; justify-content: space-between; align-items: center; gap: 12px;
       border-left: 4px solid var(--accent);
     }
-    .link-info { overflow: hidden; }
+    .link-info { overflow: hidden; flex: 1; }
     .link-title { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
     .link-url { font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+    
+    .link-actions {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
     .btn-open {
       background: rgba(59, 130, 246, 0.15); color: var(--accent);
-      text-decoration: none; padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; flex-shrink: 0;
+      text-decoration: none; padding: 8px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
     }
+    .btn-delete {
+      background: rgba(239, 68, 68, 0.15); color: var(--error);
+      padding: 8px 11px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+      line-height: 1;
+    }
+
     .empty-state { text-align: center; color: var(--muted); padding: 32px 16px; font-size: 0.9rem; }
     #toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -88,7 +108,11 @@
     <button class="btn-send" id="sendBtn" type="button">Envoyer vers le PC</button>
   </div>
 
-  <h2>Reçus du PC</h2>
+  <div class="section-header">
+    <h2>Reçus du PC</h2>
+    <button id="clearAllBtn" class="btn-clear-all" type="button" style="display: none;">Tout effacer</button>
+  </div>
+
   <div id="linksList" class="links-list">
     <div class="empty-state">Aucun lien reçu pour le moment.<br>En attente de transfert Wi-Fi...</div>
   </div>
@@ -155,7 +179,10 @@
 
     const statusEl = document.getElementById('status');
     const urlInput = document.getElementById('urlInput');
+    const pasteBtn = document.getElementById('pasteBtn');
+    const sendBtn = document.getElementById('sendBtn');
     const linksList = document.getElementById('linksList');
+    const clearAllBtn = document.getElementById('clearAllBtn');
     const toastEl = document.getElementById('toast');
 
     const params = new URLSearchParams(window.location.search);
@@ -178,18 +205,67 @@
       return div.innerHTML;
     }
 
+    function saveLinks() {
+      localStorage.setItem('airsift_links_' + roomId, JSON.stringify(receivedLinks));
+    }
+
+    function deleteLink(index) {
+      receivedLinks.splice(index, 1);
+      saveLinks();
+      renderLinks();
+      showToast('Lien supprimé');
+    }
+
+    function clearAllLinks() {
+      receivedLinks = [];
+      saveLinks();
+      renderLinks();
+      showToast('Liste effacée');
+    }
+
     function renderLinks() {
-      if (receivedLinks.length === 0) return;
-      linksList.innerHTML = receivedLinks.map(item => `
+      if (receivedLinks.length === 0) {
+        clearAllBtn.style.display = 'none';
+        linksList.innerHTML = '<div class="empty-state">Aucun lien reçu pour le moment.<br>En attente de transfert Wi-Fi...</div>';
+        return;
+      }
+
+      clearAllBtn.style.display = 'inline-block';
+      linksList.innerHTML = receivedLinks.map((item, index) => `
         <div class="link-card">
           <div class="link-info">
             <div class="link-title">${escapeHtml(item.title || item.url)}</div>
             <span class="link-url">${escapeHtml(item.url)}</span>
           </div>
-          <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" class="btn-open">Ouvrir</a>
+          <div class="link-actions">
+            <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener" class="btn-open">Ouvrir</a>
+            <button type="button" class="btn-delete" onclick="deleteLink(${index})" aria-label="Supprimer">✕</button>
+          </div>
         </div>
       `).join('');
     }
+
+    clearAllBtn.addEventListener('click', clearAllLinks);
+
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) urlInput.value = text;
+      } catch (e) {
+        showToast('Impossible de lire le presse-papiers', true);
+      }
+    });
+
+    sendBtn.addEventListener('click', () => {
+      const url = urlInput.value.trim();
+      if (!url) return showToast('Entrez un lien valide', true);
+      if (!ws || ws.readyState !== WebSocket.OPEN) return showToast('Non connecté au PC', true);
+
+      const encrypted = encryptLocal({ url, title: url }, secretKey);
+      ws.send(JSON.stringify({ type: 'link', room: roomId, payload: encrypted }));
+      urlInput.value = '';
+      showToast('Lien envoyé !');
+    });
 
     function connectWebSocket() {
       if (!roomId || !secretKey) {
@@ -198,69 +274,38 @@
         return;
       }
 
-      ws = new WebSocket(`ws://${window.location.host}`);
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}`);
 
       ws.onopen = () => {
-        statusEl.textContent = 'Wi-Fi Connecté';
+        statusEl.textContent = 'Connecté';
         statusEl.className = 'status-badge online';
-        ws.send(JSON.stringify({ type: 'join', roomId, device: 'mobile' }));
+        ws.send(JSON.stringify({ type: 'join', room: roomId }));
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'encrypted_payload' && msg.payload) {
+          if (msg.payload) {
             const decrypted = decryptLocal(msg.payload, secretKey);
-            if (decrypted && Array.isArray(decrypted.items)) {
-              receivedLinks = [...decrypted.items, ...receivedLinks].slice(0, 50);
-              localStorage.setItem('airsift_links_' + roomId, JSON.stringify(receivedLinks));
+            if (decrypted && decrypted.url) {
+              receivedLinks.unshift(decrypted);
+              saveLinks();
               renderLinks();
-              showToast(`${decrypted.items.length} lien(s) reçu(s) !`);
+              showToast('Nouveau lien reçu !');
             }
           }
         } catch (err) {
-          showToast('Erreur de déchiffrement', true);
+          console.error('Erreur de déchiffrement', err);
         }
       };
 
       ws.onclose = () => {
-        statusEl.textContent = 'Reconnexion...';
-        statusEl.className = 'status-badge';
+        statusEl.textContent = 'Déconnecté';
+        statusEl.className = 'status-badge error';
         setTimeout(connectWebSocket, 3000);
       };
     }
-
-    document.getElementById('pasteBtn').addEventListener('click', async () => {
-      try {
-        const text = await navigator.clipboard.readText();
-        if (text) urlInput.value = text.trim();
-      } catch {
-        urlInput.focus();
-        showToast('Maintenez appuyé pour coller', true);
-      }
-    });
-
-    document.getElementById('sendBtn').addEventListener('click', () => {
-      const rawUrl = urlInput.value.trim();
-      if (!rawUrl) return;
-
-      const formattedUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
-
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        showToast('PC non connecté', true);
-        return;
-      }
-
-      try {
-        const payload = { items: [{ url: formattedUrl, title: formattedUrl }] };
-        const encryptedBlob = encryptLocal(payload, secretKey);
-        ws.send(JSON.stringify({ type: 'send', payload: encryptedBlob }));
-        urlInput.value = '';
-        showToast('Envoyé au PC !');
-      } catch (err) {
-        showToast('Erreur : ' + err.message, true);
-      }
-    });
 
     renderLinks();
     connectWebSocket();
