@@ -19,7 +19,7 @@ interface UrlItem {
   id: number;
   url: string;
   title: string;
-  status: 'inbox' | 'to_send' | 'archive';
+  status: 'inbox' | 'to_send' | 'sent' | 'archive'; // <-- Ajout de 'sent'
   room_id?: string | null;
   created_at: string;
 }
@@ -30,11 +30,14 @@ interface RoomItem {
   secret_key: string;
   full_url: string;
 }
+
 const COLUMNS: { id: UrlItem['status']; title: string; color: string }[] = [
   { id: 'inbox', title: '📥 À trier (Inbox)', color: '#e3f2fd' },
   { id: 'to_send', title: '🚀 Prêt à envoyer', color: '#e8f5e9' },
+  { id: 'sent', title: '📤 Envoyé', color: '#f3e5f5' }, // <-- Nouvelle colonne violet pâle
   { id: 'archive', title: '📦 Archives', color: '#f5f5f5' },
 ];
+
 function DraggableCard({
   item,
   senderName,
@@ -161,6 +164,7 @@ function App() {
       activationConstraint: { distance: 5 },
     })
   );
+
   const loadData = async () => {
     const [urlsData, roomsData] = await Promise.all([
       window.airsiftAPI.getAllUrls(),
@@ -168,44 +172,46 @@ function App() {
     ]);
     setUrls(urlsData);
     setRooms(roomsData);
+
+    // Sélectionne automatiquement le 1er destinataire [0] si aucun n'est encore défini
     if (roomsData.length > 0 && !selectedRoomId) {
-      setSelectedRoomId(roomsData.room_id);
+      setSelectedRoomId(roomsData[0].room_id);
     }
   };
+
   
-  
-    // Joue un double bip doux sans aucun fichier audio externe
-    const playReceiveSound = () => {
-      try {
-        const ctx = new AudioContext();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime); // Note La5
-        osc.frequency.setValueAtTime(1108.73, ctx.currentTime + 0.1); // Note Do#6
-        gain.gain.setValueAtTime(0.15, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.25);
-      } catch {
-        // Ignore si l'audio est bloqué
-      }
-    };
-  
-    useEffect(() => {
+  // Joue un double bip doux sans aucun fichier audio externe
+  const playReceiveSound = () => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // Note La5
+      osc.frequency.setValueAtTime(1108.73, ctx.currentTime + 0.1); // Note Do#6
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    } catch {
+      // Ignore si l'audio est bloqué
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+
+    const unsubscribe = window.airsiftAPI.onUrlsReceived((newItems: UrlItem[]) => {
       loadData();
-  
-      const unsubscribe = window.airsiftAPI.onUrlsReceived((newItems: UrlItem[]) => {
-        loadData();
-        playReceiveSound();
-        setErrorMsg('');
-        const count = newItems?.length || 1;
-        setStatusMsg(`🔔 ${count} ${count > 1 ? 'nouveaux liens reçus' : 'nouveau lien reçu'} dans "À trier" !`);
-      });
-      return () => unsubscribe();
-    }, []);
+      playReceiveSound();
+      setErrorMsg('');
+      const count = newItems?.length || 1;
+      setStatusMsg(`🔔 ${count} ${count > 1 ? 'nouveaux liens reçus' : 'nouveau lien reçu'} dans "À trier" !`);
+    });
+    return () => unsubscribe();
+  }, []);
   
 
 
@@ -235,20 +241,28 @@ function App() {
     );
     await window.airsiftAPI.updateUrlStatus(urlId, newStatus);
   };
+  
+
   const handleSendCloud = async () => {
     setErrorMsg('');
     setStatusMsg('');
 
-    if (!selectedRoomId) {
+    const targetId = selectedRoomId || (rooms.length > 0 ? rooms[0].room_id : '');
+    if (!targetId) {
       setErrorMsg('Veuillez sélectionner un destinataire.');
       return;
     }
 
+    // On mémorise le nombre de liens prêts avant l'envoi
+    const countToSend = readyCount;
+
     try {
-      const result = await window.airsiftAPI.sendReadyUrlsCloud(selectedRoomId);
+      const result = await window.airsiftAPI.sendReadyUrlsCloud(targetId);
       if (result.success) {
-        const targetRoom = rooms.find((r) => r.room_id === selectedRoomId);
-        setStatusMsg(`✅ Liens chiffrés envoyés vers ${targetRoom?.name || 'le relais'} !`);
+        const targetRoom = rooms.find((r) => r.room_id === targetId);
+        await loadData();
+        const label = countToSend > 1 ? 'Liens chiffrés envoyés' : 'Lien chiffré envoyé';
+        setStatusMsg(`✅ ${label} vers ${targetRoom?.name || 'le relais'} !`);
       } else {
         setErrorMsg(result.error || "Erreur lors de l'envoi.");
       }
@@ -256,6 +270,8 @@ function App() {
       setErrorMsg(err.message || "Aucun lien prêt à envoyer.");
     }
   };
+
+
   const handleCopySecretLink = () => {
     const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
     if (!currentRoom) return;
@@ -368,7 +384,6 @@ function App() {
                 🗑️
               </Button>
             )}
-
 
             <Button
               variant="outlined"

@@ -54,6 +54,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('rooms:delete', (_, id: number) => roomRepository.delete(id));
 
+
   // 4. Canal IPC pour envoyer la colonne "Prêt à envoyer" vers le relais local
   ipcMain.handle('cloud:sendReadyUrls', async (_, roomId: string) => {
     const allUrls = urlRepository.getAll();
@@ -63,8 +64,18 @@ app.whenReady().then(async () => {
       throw new Error('Aucun lien dans la colonne "Prêt à envoyer".');
     }
 
-    return await cloudShare.sendToRoom(roomId, readyUrls);
+    const result = await cloudShare.sendToRoom(roomId, readyUrls);
+
+    // Si l'envoi a réussi, on déplace automatiquement les liens vers la colonne "Envoyé"
+    if (result.success) {
+      for (const item of readyUrls) {
+        urlRepository.updateStatus(item.id, 'sent');
+      }
+    }
+
+    return result;
   });
+
 
   // 5. Création de la fenêtre et connexion du PC au relais local
   const mainWindow = createWindow();

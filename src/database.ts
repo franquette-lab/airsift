@@ -7,7 +7,9 @@ export interface UrlItem {
   id: number;
   url: string;
   title: string;
-  status: 'inbox' | 'to_send' | 'archive';
+  
+  status: 'inbox' | 'to_send' | 'sent' | 'archive'; // <-- Ajout de 'sent'
+
   room_id: string | null; // Identifie qui a envoyé le lien (null = ajouté localement sur le PC)
   created_at: string;
 }
