@@ -6,6 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Airsift • Mobile</title>
+
   <style>
     :root {
       --bg: #0f172a;
@@ -37,9 +38,11 @@
       background: var(--card); padding: 16px; border-radius: 14px;
       box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2); margin-bottom: 24px;
     }
-    .input-group { display: flex; gap: 8px; margin-bottom: 12px; }
+    .input-group {
+      display: flex; align-items: stretch; gap: 8px; margin-bottom: 12px; width: 100%;
+    }
     input[type="url"] {
-      flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #475569;
+      flex: 1; min-width: 0; padding: 12px; border-radius: 10px; border: 1px solid #475569;
       background: #0f172a; color: var(--text); font-size: 1rem; outline: none;
     }
     input[type="url"]:focus { border-color: var(--accent); }
@@ -48,8 +51,12 @@
       font-size: 0.95rem; cursor: pointer;
     }
     button:active { opacity: 0.7; }
-    .btn-paste { background: #334155; color: var(--text); }
-    .btn-send { background: var(--accent); color: white; width: width: 100%; width: 100%; }
+    .btn-paste {
+      background: #334155; color: var(--text);
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 14px; flex-shrink: 0;
+    }
+    .btn-send { background: var(--accent); color: white; width: 100%; }
     
     .section-header {
       display: flex; justify-content: space-between; align-items: center;
@@ -92,35 +99,39 @@
       font-size: 0.85rem; font-weight: 600; opacity: 0; transition: opacity 0.3s; pointer-events: none;
     }
   </style>
+
+
+
 </head>
 <body>
-
   <header>
     <h1>🔒 Hare Sync</h1>
     <span id="status" class="status-badge">Connexion...</span>
   </header>
-
   <div class="send-box">
     <div class="input-group">
       <input type="url" id="urlInput" placeholder="https://..." autocomplete="off" autocapitalize="off">
-      <button class="btn-paste" id="pasteBtn" type="button">Coller</button>
+      <button class="btn-paste" id="pasteBtn" type="button" aria-label="Coller" title="Coller">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+      </button>
     </div>
     <button class="btn-send" id="sendBtn" type="button">Envoyer vers le PC</button>
   </div>
-
   <div class="section-header">
     <h2>Reçus du PC</h2>
     <button id="clearAllBtn" class="btn-clear-all" type="button" style="display: none;">Tout effacer</button>
   </div>
-
   <div id="linksList" class="links-list">
     <div class="empty-state">Aucun lien reçu pour le moment.<br>En attente de transfert Wi-Fi...</div>
   </div>
-
   <div id="toast">Lien envoyé !</div>
-
+  
   <!-- Bibliothèque légère compatible HTTP local sur Safari iOS -->
   <script>
+
     function bufferToBase64Url(bytes) {
       let binary = '';
       for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
