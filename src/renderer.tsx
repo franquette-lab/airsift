@@ -38,6 +38,7 @@ const COLUMNS: { id: UrlItem['status']; title: string; color: string }[] = [
   { id: 'archive', title: '📦 Archives', color: '#f5f5f5' },
 ];
 
+
 function DraggableCard({
   item,
   senderName,
@@ -65,12 +66,28 @@ function DraggableCard({
     wordBreak: 'break-all',
     gap: '8px',
   };
+
+  // Garantit que le lien possède bien un protocole pour être cliquable
+  const href = /^https?:\/\//i.test(item.url) ? item.url : `https://${item.url}`;
+
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <span style={{ fontSize: '14px', fontFamily: 'sans-serif', color: '#333' }}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            fontSize: '14px',
+            fontFamily: 'sans-serif',
+            color: '#1976d2',
+            textDecoration: 'underline',
+            cursor: 'pointer',
+          }}
+        >
           {item.url}
-        </span>
+        </a>
         {senderName && (
           <span
             style={{
@@ -106,6 +123,10 @@ function DraggableCard({
     </div>
   );
 }
+
+
+
+
 function DroppableColumn({
   id,
   title,
