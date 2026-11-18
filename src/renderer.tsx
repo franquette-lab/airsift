@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button } from '@mui/material';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   DndContext,
   DragEndEvent,
@@ -186,6 +187,8 @@ function App() {
     })
   );
 
+const [showQrModal, setShowQrModal] = useState(false);
+
   const loadData = async () => {
     const [urlsData, roomsData] = await Promise.all([
       window.airsiftAPI.getAllUrls(),
@@ -325,6 +328,8 @@ function App() {
 
 
   const readyCount = urls.filter((u) => u.status === 'to_send').length;
+
+  
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px', fontFamily: 'sans-serif' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '24px', marginTop: 0 }}>
@@ -405,7 +410,6 @@ function App() {
                 🗑️
               </Button>
             )}
-
             <Button
               variant="outlined"
               size="small"
@@ -414,6 +418,22 @@ function App() {
             >
               🔗 Copier le lien secret
             </Button>
+
+            {rooms.length > 0 && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setShowQrModal(true)}
+                title="Afficher le QR Code pour scanner sur mobile"
+              >
+                📱 QR Code
+              </Button>
+            )}
+
+
+
+
+
 
             {!isAddingRoom ? (
               <Button
@@ -485,6 +505,8 @@ function App() {
         )}
       </div>
 
+
+
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
           {COLUMNS.map((col) => (
@@ -500,8 +522,67 @@ function App() {
           ))}
         </div>
       </DndContext>
+
+      {showQrModal && (() => {
+        const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
+        if (!currentRoom) return null;
+
+        return (
+          <div
+            onClick={() => setShowQrModal(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                backgroundColor: '#ffffff',
+                padding: '28px',
+                borderRadius: '16px',
+                textAlign: 'center',
+                maxWidth: '340px',
+                width: '90%',
+                boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '16px',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '18px', color: '#1a1a1a' }}>
+                🔒 Accès mobile : {currentRoom.name}
+              </h3>
+              <p style={{ margin: 0, fontSize: '13px', color: '#555' }}>
+                Scannez ce code avec l'appareil photo de votre iPhone ou Android pour ouvrir la session chiffrée.
+              </p>
+
+              <div style={{ padding: '12px', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '12px' }}>
+                <QRCodeSVG value={currentRoom.full_url} size={200} level="M" />
+              </div>
+
+              <Button
+                variant="contained"
+                fullWidth
+                onClick={() => setShowQrModal(false)}
+              >
+                Fermer
+              </Button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
+
+
+
 }
 const rootElement = document.getElementById('root');
 if (rootElement) {

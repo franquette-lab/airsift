@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Airsift • Mobile</title>
+  <title>HareSync • Mobile</title>
 
   <style>
-    :root {
+    :root { 
       --bg: #0f172a;
       --card: #1e293b;
       --text: #f8fafc;
@@ -129,8 +129,18 @@
   </div>
   <div id="toast">Lien envoyé !</div>
   
-  <!-- Bibliothèque légère compatible HTTP local sur Safari iOS -->
+  <script src="/noble-crypto.js"></script>
   <script>
+    if (!window.NobleCrypto) {
+      console.error('[HareSync] noble-crypto.js introuvable. Verifiez /noble-crypto.js');
+    }
+    const { gcm, hkdf, sha256 } = window.NobleCrypto || {};
+
+    function getRandomBytes(length) {
+      const bytes = new Uint8Array(length);
+      window.crypto.getRandomValues(bytes);
+      return bytes;
+    }
 
     function bufferToBase64Url(bytes) {
       let binary = '';
@@ -147,45 +157,44 @@
       return bytes;
     }
 
-    function xorStream(data, key, nonce) {
-      const out = new Uint8Array(data.length);
-      let state = 0x9e3779b9;
-      for (let i = 0; i < key.length; i++) state = Math.imul(state ^ key[i], 0x85ebca6b);
-      for (let i = 0; i < nonce.length; i++) state = Math.imul(state ^ nonce[i], 0xc2b2ae35);
-
-      for (let i = 0; i < data.length; i++) {
-        state ^= state << 13;
-        state ^= state >>> 17;
-        state ^= state << 5;
-        const keyByte = (state >>> ((i % 4) * 8)) & 0xff;
-        const mixByte = key[i % key.length] ^ nonce[i % nonce.length];
-        out[i] = data[i] ^ keyByte ^ mixByte;
-      }
-      return out;
+    function deriveAesKey(masterKey, salt) {
+      const info = new TextEncoder().encode('airsift-v1-aes256gcm');
+      return hkdf(sha256, masterKey, salt, info, 32);
     }
 
     function encryptLocal(data, secretKeyBase64Url) {
-      const key = base64UrlToBuffer(secretKeyBase64Url);
-      const nonce = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) nonce[i] = Math.floor(Math.random() * 256);
+      const masterKey = base64UrlToBuffer(secretKeyBase64Url);
+      const salt = getRandomBytes(16);
+      const nonce = getRandomBytes(12);
+      const aesKey = deriveAesKey(masterKey, salt);
 
-      const encoded = new TextEncoder().encode(JSON.stringify(data));
-      const cipher = xorStream(encoded, key, nonce);
+      const plaintext = new TextEncoder().encode(JSON.stringify(data));
+      const ciphertextWithTag = gcm(aesKey, nonce).encrypt(plaintext);
 
-      const combined = new Uint8Array(nonce.length + cipher.length);
-      combined.set(nonce, 0);
-      combined.set(cipher, nonce.length);
+      const combined = new Uint8Array(16 + 12 + ciphertextWithTag.length);
+      combined.set(salt, 0);
+      combined.set(nonce, 16);
+      combined.set(ciphertextWithTag, 28);
+
       return bufferToBase64Url(combined);
     }
 
     function decryptLocal(encryptedBase64Url, secretKeyBase64Url) {
-      const key = base64UrlToBuffer(secretKeyBase64Url);
+      const masterKey = base64UrlToBuffer(secretKeyBase64Url);
       const combined = base64UrlToBuffer(encryptedBase64Url);
-      const nonce = combined.slice(0, 16);
-      const cipher = combined.slice(16);
 
-      const plainBytes = xorStream(cipher, key, nonce);
-      return JSON.parse(new TextDecoder().decode(plainBytes));
+      if (combined.length < 44) {
+        throw new Error('Paquet chiffré invalide ou tronqué');
+      }
+
+      const salt = combined.slice(0, 16);
+      const nonce = combined.slice(16, 28);
+      const ciphertextWithTag = combined.slice(28);
+
+      const aesKey = deriveAesKey(masterKey, salt);
+      const plaintext = gcm(aesKey, nonce).decrypt(ciphertextWithTag);
+
+      return JSON.parse(new TextDecoder().decode(plaintext));
     }
 
     const statusEl = document.getElementById('status');
@@ -220,12 +229,13 @@
       localStorage.setItem('airsift_links_' + roomId, JSON.stringify(receivedLinks));
     }
 
-    function deleteLink(index) {
+    // Attaché à window car <script type="module"> a sa propre portée isolée
+    window.deleteLink = function(index) {
       receivedLinks.splice(index, 1);
       saveLinks();
       renderLinks();
       showToast('Lien supprimé');
-    }
+    };
 
     function clearAllLinks() {
       receivedLinks = [];
@@ -271,11 +281,17 @@
       const url = urlInput.value.trim();
       if (!url) return showToast('Entrez un lien valide', true);
       if (!ws || ws.readyState !== WebSocket.OPEN) return showToast('Non connecté au PC', true);
+      if (!gcm || !hkdf || !sha256) return showToast('Crypto mobile non chargée', true);
 
-      const encrypted = encryptLocal({ url, title: url }, secretKey);
-      ws.send(JSON.stringify({ type: 'link', room: roomId, payload: encrypted }));
-      urlInput.value = '';
-      showToast('Lien envoyé !');
+      try {
+        const encrypted = encryptLocal({ items: [{ url, title: url }] }, secretKey);
+        ws.send(JSON.stringify({ type: 'send', payload: encrypted }));
+        urlInput.value = '';
+        showToast('Lien envoyé !');
+      } catch (err) {
+        console.error('[HareSync] Échec chiffrement AES-GCM:', err);
+        showToast('Échec du chiffrement', true);
+      }
     });
 
     function connectWebSocket() {
@@ -291,23 +307,42 @@
       ws.onopen = () => {
         statusEl.textContent = 'Connecté';
         statusEl.className = 'status-badge online';
-        ws.send(JSON.stringify({ type: 'join', room: roomId }));
+        ws.send(JSON.stringify({ type: 'join', roomId: roomId, device: 'mobile' }));
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.payload) {
-            const decrypted = decryptLocal(msg.payload, secretKey);
-            if (decrypted && decrypted.url) {
-              receivedLinks.unshift(decrypted);
-              saveLinks();
-              renderLinks();
-              showToast('Nouveau lien reçu !');
-            }
+          if (msg.type !== 'encrypted_payload' || typeof msg.payload !== 'string') {
+            console.warn('[HareSync] Message ignore:', msg.type);
+            return;
           }
+
+          let decrypted;
+          try {
+            decrypted = decryptLocal(msg.payload, secretKey);
+          } catch (err) {
+            console.error('[HareSync] Échec déchiffrement AES-GCM:', err);
+            showToast('Échec du déchiffrement', true);
+            return;
+          }
+
+          const items = Array.isArray(decrypted?.items)
+            ? decrypted.items
+            : (decrypted?.url ? [decrypted] : []);
+          const validItems = items.filter((item) => item && item.url);
+
+          if (validItems.length === 0) {
+            console.error('[HareSync] Payload déchiffré invalide, attendu { items: [...] }:', decrypted);
+            return;
+          }
+
+          receivedLinks.unshift(...validItems);
+          saveLinks();
+          renderLinks();
+          showToast(validItems.length === 1 ? 'Nouveau lien reçu !' : `${validItems.length} liens reçus !`);
         } catch (err) {
-          console.error('Erreur de déchiffrement', err);
+          console.error('[HareSync] Message WebSocket invalide:', err);
         }
       };
 
