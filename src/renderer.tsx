@@ -248,10 +248,23 @@ function App() {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    await window.airsiftAPI.addUrl(input.trim());
-    setInput('');
-    loadData();
+    setErrorMsg('');
+    setStatusMsg('');
+
+    if (!input.trim()) {
+      setErrorMsg('Veuillez saisir une URL.');
+      return;
+    }
+
+    try {
+      await window.airsiftAPI.addUrl(input.trim());
+      setInput('');
+      await loadData();
+    } catch (err: any) {
+      const cleanMessage = (err?.message || 'URL invalide.')
+        .replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/i, '');
+      setErrorMsg(cleanMessage);
+    }
   };
 
   const handleDelete = async (id: number) => {

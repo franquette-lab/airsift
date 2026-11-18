@@ -286,6 +286,33 @@
 
     }
 
+    function sanitizeHttpUrl(rawUrl) {
+      if (typeof rawUrl !== 'string') return null;
+      const trimmed = rawUrl.trim();
+      if (!trimmed) return null;
+
+      // Bloque tout schéma autre que http:// ou https:// (ex: javascript:, file://, data:, chrome://)
+      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+        return null;
+      }
+
+      // Ajoute https:// par défaut si l'utilisateur a collé un domaine nu (ex: wikipedia.org)
+      const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+      try {
+        const parsed = new URL(candidate);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return null;
+        }
+        if (!parsed.hostname || (!parsed.hostname.includes('.') && parsed.hostname !== 'localhost')) {
+          return null;
+        }
+        return parsed.toString();
+      } catch {
+        return null;
+      }
+    }
+
 
     function showToast(msg, isError = false) {
       toastEl.textContent = msg;
@@ -353,13 +380,13 @@
     });
 
     sendBtn.addEventListener('click', () => {
-      const url = urlInput.value.trim();
-      if (!url) return showToast('Entrez un lien valide', true);
+      const safeUrl = sanitizeHttpUrl(urlInput.value);
+      if (!safeUrl) return showToast('URL invalide (http ou https uniquement)', true);
       if (!ws || ws.readyState !== WebSocket.OPEN) return showToast('Non connecté au PC', true);
       if (!gcm || !hkdf || !sha256) return showToast('Crypto mobile non chargée', true);
 
       try {
-        const encrypted = encryptLocal({ items: [{ url, title: url }] }, secretKey);
+        const encrypted = encryptLocal({ items: [{ url: safeUrl, title: safeUrl }] }, secretKey);
         ws.send(JSON.stringify({ type: 'send', payload: encrypted }));
         urlInput.value = '';
         showToast('Lien envoyé !');
@@ -444,7 +471,7 @@
           receivedLinks.unshift(...validItems);
           saveLinks();
           renderLinks();
-          showToast(validItems.length === 1 ? 'Nouveau lien reçu !' : `${validItems.length} liens reçus !`);
+          showToast(validItems.length === 1 ? 'Nouveau lien reçu' : `${validItems.length} liens reçus !`);
         } catch (err) {
           console.error('[HareSync] Message WebSocket invalide:', err);
         }

@@ -6,6 +6,7 @@ import { urlRepository, roomRepository, UrlItem } from './database';
 import { cloudShare } from './cloud-share';
 import { startLocalRelay } from './local-relay';
 import { createSecurePairingUrl } from './pairing-token';
+import { validateAndNormalizeUrl } from './url-validator';
 
 if (started) {
   app.quit();
@@ -77,7 +78,7 @@ app.whenReady().then(async () => {
 
   // 2. Canaux IPC pour SQLite (URLs)
   ipcMain.handle('urls:getAll', () => urlRepository.getAll());
-  ipcMain.handle('urls:add', (_, url: string, title?: string) => urlRepository.add(url, title));
+//ipcMain.handle('urls:add', (_, url: string, title?: string) => urlRepository.add(url, title));
   ipcMain.handle('urls:updateStatus', (_, id: number, status: UrlItem['status']) => urlRepository.updateStatus(id, status));
   ipcMain.handle('urls:delete', (_, id: number) => urlRepository.delete(id));
 
@@ -114,6 +115,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('rooms:createPairingUrl', (_, roomId: string, secretKey: string) => {
     return createSecurePairingUrl(localHttpUrl, roomId, secretKey, 5); // Expire dans 5 min
   });
+
+  ipcMain.handle('urls:add', (_, url: string, title?: string) => {
+    const safeUrl = validateAndNormalizeUrl(url);
+    return urlRepository.add(safeUrl, title);
+  })  
 
     // 5. Création de la fenêtre et connexion du PC au relais local
   const mainWindow = createWindow();
