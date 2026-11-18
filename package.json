@@ -37,6 +37,7 @@
     "@types/express": "^5.0.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/selfsigned": "^2.0.4",
     "@types/ws": "^8.18.2",
     "electron": "45.3.2",
     "oxfmt": "^0.41.0",
@@ -60,6 +61,7 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "selfsigned": "^5.5.0",
     "tweetnacl": "^1.0.3",
     "ws": "^8.23.0"
   }

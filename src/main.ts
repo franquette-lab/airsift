@@ -1,6 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import os from 'node:os';
 import started from 'electron-squirrel-startup';
 import { urlRepository, roomRepository, UrlItem } from './database';
 import { cloudShare } from './cloud-share';
@@ -10,28 +9,6 @@ import { validateAndNormalizeUrl } from './url-validator';
 
 if (started) {
   app.quit();
-}
-
-// Détecte la véritable adresse IPv4 Wi-Fi/Ethernet en ignorant WSL, Docker, Hyper-V, etc.
-function getLocalWifiIp(): string {
-  const interfaces = os.networkInterfaces();
-  let fallbackIp = '127.0.0.1';
-
-  for (const [name, addresses] of Object.entries(interfaces)) {
-    if (/wsl|vethernet|docker|vmware|virtualbox|loopback/i.test(name)) {
-      continue;
-    }
-
-    for (const addr of addresses || []) {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        if (addr.address.startsWith('192.168.')) {
-          return addr.address;
-        }
-        fallbackIp = addr.address;
-      }
-    }
-  }
-  return fallbackIp;
 }
 
 const createWindow = (): BrowserWindow => {
@@ -67,29 +44,30 @@ app.whenReady().then(async () => {
   // Déclare le nom de l'application auprès de Windows pour autoriser les notifications natives
   app.setAppUserModelId('Airsift');
 
-  // 1. Démarrage du serveur relais local sur le Wi-Fi maison (port 3000)
-  const rawRelayUrl = await startLocalRelay(3000);
-  const wifiIp = getLocalWifiIp();
-  const parsedUrl = new URL(rawRelayUrl);
-  parsedUrl.hostname = wifiIp;
-  const localHttpUrl = parsedUrl.origin;
-
-  console.log('[Airsift] Relais Wi-Fi démarré sur :', localHttpUrl);
+  // 1. Démarrage unique du serveur relais local sécurisé TLS sur le Wi-Fi (port 3443)
+  const localHttpsUrl = await startLocalRelay(3443, app.getPath('userData'));
+  console.log('[Airsift] Relais Wi-Fi TLS démarré sur :', localHttpsUrl);
 
   // 2. Canaux IPC pour SQLite (URLs)
   ipcMain.handle('urls:getAll', () => urlRepository.getAll());
-//ipcMain.handle('urls:add', (_, url: string, title?: string) => urlRepository.add(url, title));
+  ipcMain.handle('urls:add', (_, url: string, title?: string) => {
+    const safeUrl = validateAndNormalizeUrl(url);
+    return urlRepository.add(safeUrl, title);
+  });
   ipcMain.handle('urls:updateStatus', (_, id: number, status: UrlItem['status']) => urlRepository.updateStatus(id, status));
   ipcMain.handle('urls:delete', (_, id: number) => urlRepository.delete(id));
 
-  // 3. Canaux IPC pour gérer les salles / correspondants avec l'adresse locale
+  // 3. Canaux IPC pour gérer les salles / correspondants avec l'adresse HTTPS locale
   ipcMain.handle('rooms:getAll', () => roomRepository.getAll());
   ipcMain.handle('rooms:create', async (_, name: string) => {
-    const newRoom = await roomRepository.create(name, localHttpUrl);
+    const newRoom = await roomRepository.create(name, localHttpsUrl);
     cloudShare.connectRoom(newRoom);
     return newRoom;
   });
   ipcMain.handle('rooms:delete', (_, id: number) => roomRepository.delete(id));
+  ipcMain.handle('rooms:createPairingUrl', (_, roomId: string, secretKey: string) => {
+    return createSecurePairingUrl(localHttpsUrl, roomId, secretKey, 5); // Expire dans 5 min
+  });
 
   // 4. Canal IPC pour envoyer la colonne "Prêt à envoyer" vers le relais local
   ipcMain.handle('cloud:sendReadyUrls', async (_, roomId: string) => {
@@ -112,18 +90,9 @@ app.whenReady().then(async () => {
     return result;
   });
 
-  ipcMain.handle('rooms:createPairingUrl', (_, roomId: string, secretKey: string) => {
-    return createSecurePairingUrl(localHttpUrl, roomId, secretKey, 5); // Expire dans 5 min
-  });
-
-  ipcMain.handle('urls:add', (_, url: string, title?: string) => {
-    const safeUrl = validateAndNormalizeUrl(url);
-    return urlRepository.add(safeUrl, title);
-  })  
-
-    // 5. Création de la fenêtre et connexion du PC au relais local
+  // 5. Création de la fenêtre et connexion du PC au relais local TLS
   const mainWindow = createWindow();
-  await cloudShare.init(mainWindow, localHttpUrl);
+  await cloudShare.init(mainWindow, localHttpsUrl);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
