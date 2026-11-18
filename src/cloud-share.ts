@@ -2,8 +2,7 @@ import WebSocket from 'ws';
 import { BrowserWindow, Notification } from 'electron';
 import { roomRepository, urlRepository, RoomItem, UrlItem } from './database';
 import { encryptLocal, decryptLocal } from './crypto-utils';
-
-const RELAY_WS_URL = 'ws://localhost:3000';
+import { validateAndNormalizeUrl } from './url-validator';
 
 export interface SharedPayload {
   items: Array<{
@@ -15,9 +14,14 @@ export interface SharedPayload {
 class CloudShareManager {
   private connections = new Map<string, WebSocket>();
   private mainWindow: BrowserWindow | null = null;
+  private relayWsUrl = 'wss://127.0.0.1:3443';
 
   public async init(win: BrowserWindow, serverHttpUrl: string): Promise<void> {
     this.mainWindow = win;
+
+    // Convertit http(s)://192.168.1.20:3443 en ws(s)://192.168.1.20:3443
+    this.relayWsUrl = serverHttpUrl.replace(/^http/i, 'ws');
+
     await roomRepository.ensureDefaultRoom(serverHttpUrl);
 
     const rooms = roomRepository.getAll();
@@ -32,7 +36,10 @@ class CloudShareManager {
       previous.close();
     }
 
-    const ws = new WebSocket(RELAY_WS_URL);
+    // Autorise le certificat auto-signé local du relais TLS
+    const ws = new WebSocket(this.relayWsUrl, {
+      rejectUnauthorized: false,
+    });
 
     ws.on('open', () => {
       console.log(`[Airsift Cloud] Join salle "${room.name}" (${room.room_id})`);
@@ -100,13 +107,18 @@ class CloudShareManager {
 
     for (const item of decrypted.items) {
       if (item.url) {
-        const saved = urlRepository.add(item.url, item.title || item.url, room.room_id);
-        addedItems.push(saved);
+        try {
+          const safeUrl = validateAndNormalizeUrl(item.url);
+          const saved = urlRepository.add(safeUrl, item.title || safeUrl, room.room_id);
+          addedItems.push(saved);
+        } catch (err: any) {
+          console.warn(`[Airsift Cloud] URL mobile rejetee (${item.url}):`, err.message);
+        }
       }
     }
 
     if (addedItems.length === 0) {
-      console.warn(`[Airsift Cloud] Aucun URL valide dans le payload (salle ${room.name})`);
+      console.warn(`[Airsift Cloud] Aucune URL valide dans le payload (salle ${room.name})`);
       return;
     }
 

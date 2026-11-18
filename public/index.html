@@ -217,17 +217,17 @@
         const payload = JSON.parse(atob(base64));
 
         if (Date.now() > new Date(payload.expire).getTime()) {
-          throw new Error('QR Code expiré');
+          throw new Error('Ce QR Code a expiré. Générez-en un nouveau sur le PC.');
         }
 
-        const session = {
+        const nextSession = {
           roomId: payload.room,
           secretKey: payload.key,
           pairingToken: token,
         };
-        localStorage.setItem('airsift_paired_session', JSON.stringify(session));
+        localStorage.setItem('airsift_paired_session', JSON.stringify(nextSession));
         window.history.replaceState(null, '', window.location.pathname);
-        return session;
+        return nextSession;
       }
 
       const saved = localStorage.getItem('airsift_paired_session');
@@ -247,44 +247,6 @@
 
     let ws = null;
     let receivedLinks = JSON.parse(localStorage.getItem('airsift_links_' + roomId) || '[]');
-
-    function initPairingSession() {
-
-      const hash = window.location.hash;
-
-      // Cas 1 : Premier scan du QR Code (#pair=encodedPayload.signature)
-      if (hash.startsWith('#pair=')) {
-        const token = hash.slice(6);
-        const [encodedPayload] = token.split('.');
-
-        // Décodage Base64URL du payload JSON
-        let base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
-        while (base64.length % 4) base64 += '=';
-        const payload = JSON.parse(atob(base64));
-
-        // Vérification locale immédiate de l'expiration
-        if (Date.now() > new Date(payload.expire).getTime()) {
-          throw new Error('Ce QR Code a expiré. Générez-en un nouveau sur le PC.');
-        }
-
-        // Sauvegarde de la session appairée dans le téléphone
-        const session = {
-          roomId: payload.room,
-          secretKey: payload.key,
-          pairingToken: token, // Envoyé au serveur lors du premier 'join'
-        };
-        localStorage.setItem('airsift_paired_session', JSON.stringify(session));
-
-        // Efface le jeton sensible de l'historique et de la barre d'adresse Safari
-        window.history.replaceState(null, '', window.location.pathname);
-        return session;
-      }
-
-      // Cas 2 : Rechargement ultérieur de la page déjà appairée
-      const saved = localStorage.getItem('airsift_paired_session');
-      return saved ? JSON.parse(saved) : null;
-
-    }
 
     function sanitizeHttpUrl(rawUrl) {
       if (typeof rawUrl !== 'string') return null;
@@ -416,18 +378,20 @@
           device: 'mobile',
           pairingToken: session?.pairingToken || null,
         }));
-
-        // Le jeton à usage unique est consommé : on le retire du stockage local
-        if (session?.pairingToken) {
-          delete session.pairingToken;
-          localStorage.setItem('airsift_paired_session', JSON.stringify(session));
-        }
       };
 
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+
+          if (msg.type === 'joined') {
+            if (session?.pairingToken) {
+              delete session.pairingToken;
+              localStorage.setItem('airsift_paired_session', JSON.stringify(session));
+            }
+            return;
+          }
 
           // 1. Gestion du refus d'appairage (QR code expiré, invalide ou déjà utilisé)
           if (msg.type === 'error') {

@@ -1,13 +1,14 @@
 import express from 'express';
-import http from 'node:http';
+import https from 'node:https';
 import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import os from 'node:os';
 import { verifyMobileJoin } from './pairing-token';
+import { getOrCreateLocalCert } from './tls-cert';
 
 export function getLocalIpAddress(): string {
   const interfaces = os.networkInterfaces();
-  let fallbackIp = 'localhost';
+  let fallbackIp = '127.0.0.1';
 
   for (const name of Object.keys(interfaces)) {
     if (/wsl|vethernet|docker|vmware|virtualbox|loopback/i.test(name)) {
@@ -25,10 +26,13 @@ export function getLocalIpAddress(): string {
   return fallbackIp;
 }
 
-export function startLocalRelay(port = 3000): Promise<string> {
-  return new Promise((resolve) => {
+export function startLocalRelay(port = 3443, certStorageDir = process.cwd()): Promise<string> {
+  return new Promise(async (resolve) => {
+    const ip = getLocalIpAddress();
+    const tlsCredentials = await getOrCreateLocalCert(certStorageDir, ip);
+
     const app = express();
-    const server = http.createServer(app);
+    const server = https.createServer(tlsCredentials, app);
     const wss = new WebSocketServer({ server });
 
     app.use(express.static(path.join(process.cwd(), 'public')));
@@ -46,16 +50,18 @@ export function startLocalRelay(port = 3000): Promise<string> {
             : (typeof data.room === 'string' ? data.room : null);
 
           if (data.type === 'join' && roomId) {
-            // Vérification de sécurité si c'est un appareil mobile qui rejoint
-            if (data.device === 'mobile') {
-              const check = verifyMobileJoin(roomId, data.pairingToken);
-              if (!check.valid) {
-                console.warn(`[Relay] join mobile refuse room=${roomId} raison="${check.reason}"`);
-                ws.send(JSON.stringify({
-                  type: 'error',
-                  message: check.reason || 'QR Code invalide ou expiré',
-                }));
-                ws.close();
+            const isPc = data.device === 'pc';
+
+            if (!isPc) {
+              const verification = verifyMobileJoin(roomId, data.pairingToken);
+              if (!verification.valid) {
+                console.error(`[Relay] join refuse room=${roomId}: ${verification.reason}`);
+                if (ws.readyState === 1) {
+                  ws.send(JSON.stringify({
+                    type: 'error',
+                    message: verification.reason || 'Accès refusé',
+                  }));
+                }
                 return;
               }
             }
@@ -65,7 +71,14 @@ export function startLocalRelay(port = 3000): Promise<string> {
               rooms.set(roomId, new Set());
             }
             rooms.get(roomId)?.add(ws);
-            console.log(`[Relay] join room=${roomId} device=${data.device || 'pc'} clients=${rooms.get(roomId)?.size ?? 0}`);
+
+            console.log(
+              `[Relay] join room=${roomId} device=${data.device || 'unknown'} clients=${rooms.get(roomId)?.size ?? 0}`,
+            );
+
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'joined', roomId }));
+            }
             return;
           }
 
@@ -116,8 +129,7 @@ export function startLocalRelay(port = 3000): Promise<string> {
     });
 
     server.listen(port, '0.0.0.0', () => {
-      const ip = getLocalIpAddress();
-      resolve(`http://${ip}:${port}`);
+      resolve(`https://${ip}:${port}`);
     });
   });
 }
