@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
+import os from 'node:os';
 import started from 'electron-squirrel-startup';
 import { urlRepository, roomRepository, UrlItem } from './database';
 import { cloudShare } from './cloud-share';
@@ -9,6 +10,28 @@ if (started) {
   app.quit();
 }
 
+// Détecte la véritable adresse IPv4 Wi-Fi/Ethernet en ignorant WSL, Docker, Hyper-V, etc.
+function getLocalWifiIp(): string {
+  const interfaces = os.networkInterfaces();
+  let fallbackIp = '127.0.0.1';
+
+  for (const [name, addresses] of Object.entries(interfaces)) {
+    if (/wsl|vethernet|docker|vmware|virtualbox|loopback/i.test(name)) {
+      continue;
+    }
+
+    for (const addr of addresses || []) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        if (addr.address.startsWith('192.168.')) {
+          return addr.address;
+        }
+        fallbackIp = addr.address;
+      }
+    }
+  }
+  return fallbackIp;
+}
+
 const createWindow = (): BrowserWindow => {
   const mainWindow = new BrowserWindow({
     width: 800,
@@ -16,6 +39,14 @@ const createWindow = (): BrowserWindow => {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  });
+
+  // Ouvre les liens externes (target="_blank") dans le navigateur par défaut (Chrome, Edge, etc.)
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -35,8 +66,12 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('Airsift');
 
   // 1. Démarrage du serveur relais local sur le Wi-Fi maison (port 3000)
-  // Retourne automatiquement l'adresse locale du PC (ex: http://192.168.1.25:3000)
-  const localHttpUrl = await startLocalRelay(3000);
+  const rawRelayUrl = await startLocalRelay(3000);
+  const wifiIp = getLocalWifiIp();
+  const parsedUrl = new URL(rawRelayUrl);
+  parsedUrl.hostname = wifiIp;
+  const localHttpUrl = parsedUrl.origin;
+
   console.log('[Airsift] Relais Wi-Fi démarré sur :', localHttpUrl);
 
   // 2. Canaux IPC pour SQLite (URLs)
@@ -53,7 +88,6 @@ app.whenReady().then(async () => {
     return newRoom;
   });
   ipcMain.handle('rooms:delete', (_, id: number) => roomRepository.delete(id));
-
 
   // 4. Canal IPC pour envoyer la colonne "Prêt à envoyer" vers le relais local
   ipcMain.handle('cloud:sendReadyUrls', async (_, roomId: string) => {
@@ -76,7 +110,6 @@ app.whenReady().then(async () => {
     return result;
   });
 
-
   // 5. Création de la fenêtre et connexion du PC au relais local
   const mainWindow = createWindow();
   await cloudShare.init(mainWindow, localHttpUrl);
@@ -87,7 +120,6 @@ app.whenReady().then(async () => {
     }
   });
 });
-
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
