@@ -205,12 +205,87 @@
     const clearAllBtn = document.getElementById('clearAllBtn');
     const toastEl = document.getElementById('toast');
 
-    const params = new URLSearchParams(window.location.search);
-    const roomId = params.get('room');
-    const secretKey = window.location.hash.substring(1);
+    function initPairingSession() {
+      const hash = window.location.hash;
+
+      if (hash.startsWith('#pair=')) {
+        const token = hash.slice(6);
+        const [encodedPayload] = token.split('.');
+
+        let base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64.length % 4) base64 += '=';
+        const payload = JSON.parse(atob(base64));
+
+        if (Date.now() > new Date(payload.expire).getTime()) {
+          throw new Error('QR Code expiré');
+        }
+
+        const session = {
+          roomId: payload.room,
+          secretKey: payload.key,
+          pairingToken: token,
+        };
+        localStorage.setItem('airsift_paired_session', JSON.stringify(session));
+        window.history.replaceState(null, '', window.location.pathname);
+        return session;
+      }
+
+      const saved = localStorage.getItem('airsift_paired_session');
+      return saved ? JSON.parse(saved) : null;
+    }
+
+    let session = null;
+    try {
+      session = initPairingSession();
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'status-badge error';
+    }
+
+    const roomId = session?.roomId;
+    const secretKey = session?.secretKey;
 
     let ws = null;
     let receivedLinks = JSON.parse(localStorage.getItem('airsift_links_' + roomId) || '[]');
+
+    function initPairingSession() {
+
+      const hash = window.location.hash;
+
+      // Cas 1 : Premier scan du QR Code (#pair=encodedPayload.signature)
+      if (hash.startsWith('#pair=')) {
+        const token = hash.slice(6);
+        const [encodedPayload] = token.split('.');
+
+        // Décodage Base64URL du payload JSON
+        let base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64.length % 4) base64 += '=';
+        const payload = JSON.parse(atob(base64));
+
+        // Vérification locale immédiate de l'expiration
+        if (Date.now() > new Date(payload.expire).getTime()) {
+          throw new Error('Ce QR Code a expiré. Générez-en un nouveau sur le PC.');
+        }
+
+        // Sauvegarde de la session appairée dans le téléphone
+        const session = {
+          roomId: payload.room,
+          secretKey: payload.key,
+          pairingToken: token, // Envoyé au serveur lors du premier 'join'
+        };
+        localStorage.setItem('airsift_paired_session', JSON.stringify(session));
+
+        // Efface le jeton sensible de l'historique et de la barre d'adresse Safari
+        window.history.replaceState(null, '', window.location.pathname);
+        return session;
+      }
+
+      // Cas 2 : Rechargement ultérieur de la page déjà appairée
+      const saved = localStorage.getItem('airsift_paired_session');
+      return saved ? JSON.parse(saved) : null;
+
+    }
+
 
     function showToast(msg, isError = false) {
       toastEl.textContent = msg;
@@ -307,17 +382,45 @@
       ws.onopen = () => {
         statusEl.textContent = 'Connecté';
         statusEl.className = 'status-badge online';
-        ws.send(JSON.stringify({ type: 'join', roomId: roomId, device: 'mobile' }));
+
+        ws.send(JSON.stringify({
+          type: 'join',
+          roomId: roomId,
+          device: 'mobile',
+          pairingToken: session?.pairingToken || null,
+        }));
+
+        // Le jeton à usage unique est consommé : on le retire du stockage local
+        if (session?.pairingToken) {
+          delete session.pairingToken;
+          localStorage.setItem('airsift_paired_session', JSON.stringify(session));
+        }
       };
+
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+
+          // 1. Gestion du refus d'appairage (QR code expiré, invalide ou déjà utilisé)
+          if (msg.type === 'error') {
+            const errorText = msg.message || 'Accès refusé';
+            console.error('[HareSync] Erreur serveur:', errorText);
+            statusEl.textContent = errorText;
+            statusEl.className = 'status-badge error';
+            showToast(errorText, true);
+            localStorage.removeItem('airsift_paired_session');
+            ws.close();
+            return;
+          }
+
+          // 2. Ignorer les autres types de messages
           if (msg.type !== 'encrypted_payload' || typeof msg.payload !== 'string') {
             console.warn('[HareSync] Message ignore:', msg.type);
             return;
           }
 
+          // 3. Déchiffrement AES-256-GCM
           let decrypted;
           try {
             decrypted = decryptLocal(msg.payload, secretKey);
@@ -327,6 +430,7 @@
             return;
           }
 
+          // 4. Extraction et validation des liens
           const items = Array.isArray(decrypted?.items)
             ? decrypted.items
             : (decrypted?.url ? [decrypted] : []);

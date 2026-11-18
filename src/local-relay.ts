@@ -3,17 +3,26 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import os from 'node:os';
+import { verifyMobileJoin } from './pairing-token';
 
 export function getLocalIpAddress(): string {
   const interfaces = os.networkInterfaces();
+  let fallbackIp = 'localhost';
+
   for (const name of Object.keys(interfaces)) {
+    if (/wsl|vethernet|docker|vmware|virtualbox|loopback/i.test(name)) {
+      continue;
+    }
     for (const iface of interfaces[name] || []) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
+        if (iface.address.startsWith('192.168.')) {
+          return iface.address;
+        }
+        fallbackIp = iface.address;
       }
     }
   }
-  return 'localhost';
+  return fallbackIp;
 }
 
 export function startLocalRelay(port = 3000): Promise<string> {
@@ -37,12 +46,26 @@ export function startLocalRelay(port = 3000): Promise<string> {
             : (typeof data.room === 'string' ? data.room : null);
 
           if (data.type === 'join' && roomId) {
+            // Vérification de sécurité si c'est un appareil mobile qui rejoint
+            if (data.device === 'mobile') {
+              const check = verifyMobileJoin(roomId, data.pairingToken);
+              if (!check.valid) {
+                console.warn(`[Relay] join mobile refuse room=${roomId} raison="${check.reason}"`);
+                ws.send(JSON.stringify({
+                  type: 'error',
+                  message: check.reason || 'QR Code invalide ou expiré',
+                }));
+                ws.close();
+                return;
+              }
+            }
+
             currentRoomId = roomId;
             if (!rooms.has(roomId)) {
               rooms.set(roomId, new Set());
             }
             rooms.get(roomId)?.add(ws);
-            console.log(`[Relay] join room=${roomId} clients=${rooms.get(roomId)?.size ?? 0}`);
+            console.log(`[Relay] join room=${roomId} device=${data.device || 'pc'} clients=${rooms.get(roomId)?.size ?? 0}`);
             return;
           }
 

@@ -11,19 +11,22 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+
 declare global {
   interface Window {
     airsiftAPI: any;
   }
 }
+
 interface UrlItem {
   id: number;
   url: string;
   title: string;
-  status: 'inbox' | 'to_send' | 'sent' | 'archive'; // <-- Ajout de 'sent'
+  status: 'inbox' | 'to_send' | 'sent' | 'archive';
   room_id?: string | null;
   created_at: string;
 }
+
 interface RoomItem {
   id: number;
   name: string;
@@ -35,10 +38,9 @@ interface RoomItem {
 const COLUMNS: { id: UrlItem['status']; title: string; color: string }[] = [
   { id: 'inbox', title: '📥 À trier (Inbox)', color: '#e3f2fd' },
   { id: 'to_send', title: '🚀 Prêt à envoyer', color: '#e8f5e9' },
-  { id: 'sent', title: '📤 Envoyé', color: '#f3e5f5' }, // <-- Nouvelle colonne violet pâle
+  { id: 'sent', title: '📤 Envoyé', color: '#f3e5f5' },
   { id: 'archive', title: '📦 Archives', color: '#f5f5f5' },
 ];
-
 
 function DraggableCard({
   item,
@@ -68,7 +70,6 @@ function DraggableCard({
     gap: '8px',
   };
 
-  // Garantit que le lien possède bien un protocole pour être cliquable
   const href = /^https?:\/\//i.test(item.url) ? item.url : `https://${item.url}`;
 
   return (
@@ -125,9 +126,6 @@ function DraggableCard({
   );
 }
 
-
-
-
 function DroppableColumn({
   id,
   title,
@@ -181,13 +179,15 @@ function App() {
   const [isAddingRoom, setIsAddingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
 
+  // États de la modale QR Code sécurisé
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [pairingData, setPairingData] = useState<{ url: string; expireAt: number } | null>(null);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
     })
   );
-
-const [showQrModal, setShowQrModal] = useState(false);
 
   const loadData = async () => {
     const [urlsData, roomsData] = await Promise.all([
@@ -197,22 +197,19 @@ const [showQrModal, setShowQrModal] = useState(false);
     setUrls(urlsData);
     setRooms(roomsData);
 
-    // Sélectionne automatiquement le 1er destinataire [0] si aucun n'est encore défini
     if (roomsData.length > 0 && !selectedRoomId) {
       setSelectedRoomId(roomsData[0].room_id);
     }
   };
 
-  
-  // Joue un double bip doux sans aucun fichier audio externe
   const playReceiveSound = () => {
     try {
       const ctx = new AudioContext();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // Note La5
-      osc.frequency.setValueAtTime(1108.73, ctx.currentTime + 0.1); // Note Do#6
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1108.73, ctx.currentTime + 0.1);
       gain.gain.setValueAtTime(0.15, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
       osc.connect(gain);
@@ -236,8 +233,18 @@ const [showQrModal, setShowQrModal] = useState(false);
     });
     return () => unsubscribe();
   }, []);
-  
 
+  const handleOpenQrModal = async () => {
+    const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
+    if (!currentRoom) return;
+
+    const data = await window.airsiftAPI.createPairingUrl(
+      currentRoom.room_id,
+      currentRoom.secret_key
+    );
+    setPairingData(data);
+    setShowQrModal(true);
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,10 +253,12 @@ const [showQrModal, setShowQrModal] = useState(false);
     setInput('');
     loadData();
   };
+
   const handleDelete = async (id: number) => {
     await window.airsiftAPI.deleteUrl(id);
     loadData();
   };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
@@ -265,7 +274,6 @@ const [showQrModal, setShowQrModal] = useState(false);
     );
     await window.airsiftAPI.updateUrlStatus(urlId, newStatus);
   };
-  
 
   const handleSendCloud = async () => {
     setErrorMsg('');
@@ -277,7 +285,6 @@ const [showQrModal, setShowQrModal] = useState(false);
       return;
     }
 
-    // On mémorise le nombre de liens prêts avant l'envoi
     const countToSend = readyCount;
 
     try {
@@ -295,7 +302,6 @@ const [showQrModal, setShowQrModal] = useState(false);
     }
   };
 
-
   const handleCopySecretLink = () => {
     const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
     if (!currentRoom) return;
@@ -303,6 +309,7 @@ const [showQrModal, setShowQrModal] = useState(false);
     setErrorMsg('');
     setStatusMsg(`📋 Lien secret de "${currentRoom.name}" copié ! Ouvrez-le dans Safari sur iPhone.`);
   };
+
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoomName.trim()) return;
@@ -326,10 +333,8 @@ const [showQrModal, setShowQrModal] = useState(false);
     setStatusMsg(`🗑️ Contact "${currentRoom.name}" supprimé.`);
   };
 
-
   const readyCount = urls.filter((u) => u.status === 'to_send').length;
 
-  
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px', fontFamily: 'sans-serif' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '24px', marginTop: 0 }}>
@@ -354,6 +359,7 @@ const [showQrModal, setShowQrModal] = useState(false);
           Ajouter
         </Button>
       </form>
+
       <div
         style={{
           backgroundColor: '#f0f7ff',
@@ -410,6 +416,7 @@ const [showQrModal, setShowQrModal] = useState(false);
                 🗑️
               </Button>
             )}
+
             <Button
               variant="outlined"
               size="small"
@@ -423,17 +430,12 @@ const [showQrModal, setShowQrModal] = useState(false);
               <Button
                 variant="outlined"
                 size="small"
-                onClick={() => setShowQrModal(true)}
-                title="Afficher le QR Code pour scanner sur mobile"
+                onClick={handleOpenQrModal}
+                title="Générer un QR Code sécurisé à usage unique (valide 5 min)"
               >
                 📱 QR Code
               </Button>
             )}
-
-
-
-
-
 
             {!isAddingRoom ? (
               <Button
@@ -505,8 +507,6 @@ const [showQrModal, setShowQrModal] = useState(false);
         )}
       </div>
 
-
-
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
           {COLUMNS.map((col) => (
@@ -523,9 +523,14 @@ const [showQrModal, setShowQrModal] = useState(false);
         </div>
       </DndContext>
 
-      {showQrModal && (() => {
+      {showQrModal && pairingData && (() => {
         const currentRoom = rooms.find((r) => r.room_id === selectedRoomId);
         if (!currentRoom) return null;
+
+        const expireTime = new Date(pairingData.expireAt).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
 
         return (
           <div
@@ -547,43 +552,50 @@ const [showQrModal, setShowQrModal] = useState(false);
                 padding: '28px',
                 borderRadius: '16px',
                 textAlign: 'center',
-                maxWidth: '340px',
+                maxWidth: '350px',
                 width: '90%',
                 boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '16px',
+                gap: '14px',
               }}
             >
               <h3 style={{ margin: 0, fontSize: '18px', color: '#1a1a1a' }}>
-                🔒 Accès mobile : {currentRoom.name}
+                🔒 Appairage sécurisé : {currentRoom.name}
               </h3>
               <p style={{ margin: 0, fontSize: '13px', color: '#555' }}>
-                Scannez ce code avec l'appareil photo de votre iPhone ou Android pour ouvrir la session chiffrée.
+                QR Code <strong>à usage unique</strong> valide jusqu'à <strong>{expireTime}</strong>.
               </p>
 
               <div style={{ padding: '12px', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '12px' }}>
-                <QRCodeSVG value={currentRoom.full_url} size={200} level="M" />
+                <QRCodeSVG value={pairingData.url} size={200} level="M" />
               </div>
 
-              <Button
-                variant="contained"
-                fullWidth
-                onClick={() => setShowQrModal(false)}
-              >
-                Fermer
-              </Button>
+              <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={handleOpenQrModal}
+                >
+                  🔄 Régénérer
+                </Button>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={() => setShowQrModal(false)}
+                >
+                  Fermer
+                </Button>
+              </div>
             </div>
           </div>
         );
       })()}
     </div>
   );
-
-
-
 }
+
 const rootElement = document.getElementById('root');
 if (rootElement) {
   createRoot(rootElement).render(<App />);

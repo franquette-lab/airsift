@@ -5,6 +5,7 @@ import started from 'electron-squirrel-startup';
 import { urlRepository, roomRepository, UrlItem } from './database';
 import { cloudShare } from './cloud-share';
 import { startLocalRelay } from './local-relay';
+import { createSecurePairingUrl } from './pairing-token';
 
 if (started) {
   app.quit();
@@ -110,7 +111,11 @@ app.whenReady().then(async () => {
     return result;
   });
 
-  // 5. Création de la fenêtre et connexion du PC au relais local
+  ipcMain.handle('rooms:createPairingUrl', (_, roomId: string, secretKey: string) => {
+    return createSecurePairingUrl(localHttpUrl, roomId, secretKey, 5); // Expire dans 5 min
+  });
+
+    // 5. Création de la fenêtre et connexion du PC au relais local
   const mainWindow = createWindow();
   await cloudShare.init(mainWindow, localHttpUrl);
 

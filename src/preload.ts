@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('airsiftAPI', {
   getAllRooms: () => ipcRenderer.invoke('rooms:getAll'),
   createRoom: (name: string) => ipcRenderer.invoke('rooms:create', name),
   deleteRoom: (id: number) => ipcRenderer.invoke('rooms:delete', id),
+  createPairingUrl: (roomId: string, secretKey: string) =>
+    ipcRenderer.invoke('rooms:createPairingUrl', roomId, secretKey),
 
   // Envoi chiffré vers le relais Oracle Cloud
   sendReadyUrlsCloud: (roomId: string) => ipcRenderer.invoke('cloud:sendReadyUrls', roomId),
